@@ -1,6 +1,6 @@
 # GeoguessrAI
 
-A lightweight GeoGuessr AI built by us.
+A lightweight GeoGuessr AI built by Sam Chou, Alan Geng, Ethan Tieu, Kevin Wang
 
 <br>
 
