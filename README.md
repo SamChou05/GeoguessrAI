@@ -243,15 +243,6 @@ Try it yourself! Follow these steps:
     ```
 4. Navigate to the outputted url's to see the model's guesses in Google Maps.
 
-<br>
-
-## Video
-
-Watch our video presentation:
-[![video](https://user-images.githubusercontent.com/43970567/206905313-86b6c4ff-08f6-4919-8f57-fdd6355acb68.png)](https://youtu.be/F2mRi_Vl4hg)
-
-<br>
-
 ## Looking Forward
 
 We are very pleased with the results that we have seen, yet there are still improvements that can be made. For starters, we only have 32,000 street view data points, which is very small considering the amount of Google Street View coverage and how difficult the problem space is. With more data, not only will the network naturally perform better after training, but we would be able to increase the number of classes, allowing finer-grained guessing which would in turn increase model performance. 
