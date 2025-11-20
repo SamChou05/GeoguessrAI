@@ -1,6 +1,67 @@
-.DS_Store
-__pycache__
-key.txt
+# Data directories - Too large to commit
+kaggle_dataset/
+kaggle_train/
+kaggle_test/
 gsv_scraper_out/
+
+# Model files - Can be regenerated (uncomment if you want to exclude)
+# model/*.pt
+# model/*.pkl
+# Keep country_map.pkl if you want to commit it (it's small)
+
+# Training outputs - Generated files
 train_out/
 test_out/
+
+# Demo images - Optional (usually not committed)
+demo_in/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Log files
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Review/temporary documentation (if you don't want to commit)
+ADDITIONAL_FILES_TO_DELETE.md
+CORE_FILES_TO_COMMIT.md
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Environment files
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
