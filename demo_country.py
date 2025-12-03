@@ -26,9 +26,16 @@ class GeoguessrAICountry():
         # Load model
         self.model = torch.load(MODEL_RESNET, weights_only=False)
         self.model.eval()
-        
-        assert self.model.fc.out_features == self.num_classes, \
-            f"Model has {self.model.fc.out_features} classes but mapping has {self.num_classes}"
+
+        # Handle both Sequential (with dropout) and Linear fc layers
+        if hasattr(self.model.fc, 'out_features'):
+            model_classes = self.model.fc.out_features
+        else:
+            # Sequential: Dropout -> Linear, so Linear is at index 1
+            model_classes = self.model.fc[1].out_features
+
+        assert model_classes == self.num_classes, \
+            f"Model has {model_classes} classes but mapping has {self.num_classes}"
         
         print(f"Loaded model with {self.num_classes} countries")
         print(f"Countries: {sorted(self.country_to_idx.keys())}")

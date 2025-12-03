@@ -33,13 +33,13 @@ except ImportError:
     ClientError = None
 
 # Configuration
-NUM_EPOCHS = 20  # Increased epochs with better regularization
+NUM_EPOCHS = 20
 BATCH_SIZE = 32
-LEARNING_RATES = [0.001, 0.0005, 0.0001, 0.00005]  # Added lower learning rate
-WEIGHT_DECAY = 0.001  # Increased weight decay for regularization
+LEARNING_RATES = [0.001, 0.0005, 0.0001, 0.00005]
+WEIGHT_DECAY = 0.0001  # Reduced weight decay (was 0.001)
 
-# Paths - Version 2: Filtered dataset with matching countries
-RUN_VERSION = 'v2_filtered'
+# Paths - Version 3: Reduced regularization + more trainable layers
+RUN_VERSION = 'v3_reduced_reg'
 TRAIN_OUT = f'results/run_{RUN_VERSION}/train_out'
 TEST_OUT = f'results/run_{RUN_VERSION}/test_out'
 MODEL = f'results/run_{RUN_VERSION}/model'
@@ -181,8 +181,8 @@ def get_train_transforms():
     train_transforms = T.Compose([
         T.RandomResizedCrop(224, scale=(0.8, 1.0)),  # Random crop
         T.RandomHorizontalFlip(p=0.5),               # Random flip
-        T.RandomRotation(15),                        # Random rotation
-        T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),  # Color jitter
+        T.RandomRotation(10),                        # Reduced rotation (was 15)
+        T.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05),  # Reduced jitter (was 0.1)
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -452,22 +452,29 @@ def main():
             print("Reinitializing final layer with dropout...")
             num_features = resnet.fc.in_features
             resnet.fc = nn.Sequential(
-                nn.Dropout(p=0.5),  # Add dropout before final layer
+                nn.Dropout(p=0.1),  # Reduced dropout (was 0.5)
                 nn.Linear(num_features, num_classes)
             )
     else:
         print("\nInitializing new ResNet-18 model...")
         resnet = resnet18(weights=ResNet18_Weights.DEFAULT)
-        # Freeze all layers except final layer
-        for param in resnet.parameters():
-            param.requires_grad = False
+        # Freeze early layers, unfreeze layer3, layer4, and fc for better feature learning
+        for name, param in resnet.named_parameters():
+            if 'layer3' in name or 'layer4' in name or 'fc' in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
         # Reinitialize final layer for country classification with dropout
         num_features = resnet.fc.in_features
         resnet.fc = nn.Sequential(
-            nn.Dropout(p=0.5),  # Add dropout before final layer
+            nn.Dropout(p=0.1),  # Reduced dropout (was 0.5)
             nn.Linear(num_features, num_classes)
         )
+        # Count trainable parameters
+        trainable = sum(p.numel() for p in resnet.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in resnet.parameters())
         print(f"Model initialized with {num_classes} output classes")
+        print(f"Trainable parameters: {trainable:,} / {total:,} ({100*trainable/total:.1f}%)")
     
     # Create datasets and data loaders
     train_data = CountryDataset(train_image_paths, train_countries, country_to_idx, is_training=True)
