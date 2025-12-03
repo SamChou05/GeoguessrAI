@@ -24,7 +24,7 @@ class GeoguessrAICountry():
             self.num_classes = mapping['num_classes']
         
         # Load model
-        self.model = torch.load(MODEL_RESNET)
+        self.model = torch.load(MODEL_RESNET, weights_only=False)
         self.model.eval()
         
         assert self.model.fc.out_features == self.num_classes, \

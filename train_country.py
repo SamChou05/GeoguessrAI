@@ -33,14 +33,16 @@ except ImportError:
     ClientError = None
 
 # Configuration
-NUM_EPOCHS = 15
+NUM_EPOCHS = 20  # Increased epochs with better regularization
 BATCH_SIZE = 32
-LEARNING_RATES = [0.001, 0.0005, 0.0001]
-WEIGHT_DECAY = 0.0001
+LEARNING_RATES = [0.001, 0.0005, 0.0001, 0.00005]  # Added lower learning rate
+WEIGHT_DECAY = 0.001  # Increased weight decay for regularization
 
-# Paths
-TRAIN_OUT = 'train_out'
-MODEL = 'model'
+# Paths - Version 2: Filtered dataset with matching countries
+RUN_VERSION = 'v2_filtered'
+TRAIN_OUT = f'results/run_{RUN_VERSION}/train_out'
+TEST_OUT = f'results/run_{RUN_VERSION}/test_out'
+MODEL = f'results/run_{RUN_VERSION}/model'
 MODEL_COUNTRY_MAP = os.path.join(MODEL, 'country_map.pkl')
 MODEL_RESNET = os.path.join(MODEL, 'resnet_country.pt')
 LOSSES_CSV = os.path.join(TRAIN_OUT, 'losses.csv')
@@ -53,8 +55,8 @@ USE_S3 = False  # Set to True to use S3
 S3_BUCKET = 'your-bucket-name'
 S3_TRAIN_PREFIX = 'train/'
 S3_TEST_PREFIX = 'test/'
-LOCAL_TRAIN_DIR = 'kaggle_train'  # Kaggle training dataset (split from full dataset)
-LOCAL_TEST_DIR = 'kaggle_test'    # Temporary test split (replace with your separate test dataset later)
+LOCAL_TRAIN_DIR = 'kaggle_dataset_filtered'  # Filtered dataset (only countries with test data)
+LOCAL_TEST_DIR = 'test_dataset'    # Curated test set
 
 # S3 client (only initialized if using S3)
 s3_client = None
@@ -65,12 +67,154 @@ if USE_S3:
 
 start_time = perf_counter()
 
-def preprocess(image):
-    """Preprocess image for ResNet-18"""
-    if image.shape[0] == 4:  # remove alpha channel
-        image = image[:3]
+def generate_training_summary(total_train_images, total_test_images, num_classes, start_time):
+    """Generate a comprehensive training summary for research papers"""
+
+    training_time = perf_counter() - start_time
+
+    # Load training history for detailed metrics
+    train_losses = []
+    test_losses = []
+    train_accuracies = []
+    test_accuracies = []
+
+    if os.path.exists(LOSSES_CSV) and os.path.getsize(LOSSES_CSV) > 0:
+        with open(LOSSES_CSV, 'r') as losses_csv:
+            next(losses_csv)  # Skip header
+            for row in losses_csv:
+                train_loss, test_loss = eval(row)
+                train_losses.append(train_loss)
+                test_losses.append(test_loss)
+
+    if os.path.exists(ACCURACIES_CSV) and os.path.getsize(ACCURACIES_CSV) > 0:
+        with open(ACCURACIES_CSV, 'r') as accuracies_csv:
+            next(accuracies_csv)  # Skip header
+            for row in accuracies_csv:
+                train_accuracy, test_accuracy = eval(row)
+                train_accuracies.append(train_accuracy)
+                test_accuracies.append(test_accuracy)
+
+    # Calculate detailed metrics
+    final_train_accuracy = train_accuracies[-1] if train_accuracies else 0.0
+    final_test_accuracy = test_accuracies[-1] if test_accuracies else 0.0
+    best_train_accuracy = max(train_accuracies) if train_accuracies else 0.0
+    best_test_accuracy = max(test_accuracies) if test_accuracies else 0.0
+    avg_train_accuracy = sum(train_accuracies) / len(train_accuracies) if train_accuracies else 0.0
+    avg_test_accuracy = sum(test_accuracies) / len(test_accuracies) if test_accuracies else 0.0
+
+    summary = []
+    summary.append("=" * 80)
+    summary.append("GEOGUESSR AI: TRAINING SUMMARY")
+    summary.append("=" * 80)
+    summary.append("")
+    summary.append("Training Configuration:")
+    summary.append(f"  • Model: ResNet-18 (Transfer Learning)")
+    summary.append(f"  • Epochs: {NUM_EPOCHS}")
+    summary.append(f"  • Batch Size: {BATCH_SIZE}")
+    summary.append(f"  • Learning Rates: {LEARNING_RATES}")
+    summary.append(f"  • Weight Decay: {WEIGHT_DECAY}")
+    summary.append(f"  • Optimizer: Adam")
+    summary.append("")
+    summary.append("Dataset:")
+    summary.append(f"  • Training Images: {total_train_images:,}")
+    summary.append(f"  • Test Images: {total_test_images:,}")
+    summary.append(f"  • Total Images: {total_train_images + total_test_images:,}")
+    summary.append(f"  • Number of Classes: {num_classes}")
+    summary.append("")
+    summary.append("Training Performance:")
+    summary.append(f"  • Total Training Time: {training_time:.1f} seconds ({training_time/3600:.1f} hours)")
+    summary.append(f"  • Average Time per Epoch: {training_time/NUM_EPOCHS:.1f} seconds")
+    summary.append("")
+    summary.append("Accuracy Metrics:")
+    summary.append(f"  • Final Training Accuracy: {final_train_accuracy:.2%}")
+    summary.append(f"  • Final Test Accuracy: {final_test_accuracy:.2%}")
+    summary.append(f"  • Best Training Accuracy: {best_train_accuracy:.2%}")
+    summary.append(f"  • Best Test Accuracy: {best_test_accuracy:.2%}")
+    summary.append(f"  • Average Training Accuracy: {avg_train_accuracy:.2%}")
+    summary.append(f"  • Average Test Accuracy: {avg_test_accuracy:.2%}")
+    summary.append("")
+    summary.append("Training History:")
+    summary.append(f"  • Training Epochs Completed: {len(train_accuracies)}")
+    summary.append(f"  • Loss Convergence: {train_losses[-1]:.4f} (train) → {test_losses[-1]:.4f} (test)")
+    summary.append("")
+    summary.append("Training Dynamics:")
+    if train_accuracies and test_accuracies:
+        summary.append(f"  • Initial Training Accuracy: {train_accuracies[0]:.1%}")
+        summary.append(f"  • Initial Test Accuracy: {test_accuracies[0]:.1%}")
+        summary.append(f"  • Training Improvement: {(final_train_accuracy - train_accuracies[0]):+.1%}")
+        summary.append(f"  • Test Improvement: {(final_test_accuracy - test_accuracies[0]):+.1%}")
+        if len(train_accuracies) > 1:
+            summary.append(f"  • Best Epoch (Test): {test_accuracies.index(best_test_accuracy) + 1}/{len(test_accuracies)}")
+    summary.append("")
+    summary.append("Output Files:")
+    summary.append(f"  • Trained Model: {MODEL_RESNET}")
+    summary.append(f"  • Country Mapping: {MODEL_COUNTRY_MAP}")
+    summary.append(f"  • Loss History: {LOSSES_CSV}")
+    summary.append(f"  • Accuracy History: {ACCURACIES_CSV}")
+    summary.append(f"  • Loss Plot: {LOSS_PLOT}")
+    summary.append(f"  • Accuracy Plot: {ACCURACY_PLOT}")
+    summary.append("")
+    summary.append("Next Steps:")
+    summary.append("  • Run evaluation: python3 test_country.py")
+    summary.append("  • Run demo: python3 demo_country.py")
+    summary.append("")
+    summary.append("=" * 80)
+
+    # Write to file
+    summary_path = os.path.join(TRAIN_OUT, 'training_summary.txt')
+    os.makedirs(TRAIN_OUT, exist_ok=True)
+    with open(summary_path, 'w') as f:
+        f.write('\n'.join(summary))
+
+    print(f"\n📄 Training summary saved to: {summary_path}")
+    return summary_path
+
+def get_train_transforms():
+    """Get data augmentation transforms for training"""
+    import torchvision.transforms as T
+    from torchvision.models import ResNet18_Weights
+
     weights = ResNet18_Weights.DEFAULT
-    transform = weights.transforms()
+    base_transforms = weights.transforms()
+
+    # Add augmentation transforms
+    train_transforms = T.Compose([
+        T.RandomResizedCrop(224, scale=(0.8, 1.0)),  # Random crop
+        T.RandomHorizontalFlip(p=0.5),               # Random flip
+        T.RandomRotation(15),                        # Random rotation
+        T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),  # Color jitter
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    return train_transforms
+
+def get_val_transforms():
+    """Get transforms for validation/testing (no augmentation)"""
+    from torchvision.models import ResNet18_Weights
+    weights = ResNet18_Weights.DEFAULT
+    return weights.transforms()
+
+def preprocess(image, is_training=False):
+    """Preprocess image for ResNet-18 with optional augmentation"""
+    # Convert torch.Tensor to PIL Image for transforms
+    from PIL import Image
+    import numpy as np
+
+    if isinstance(image, torch.Tensor):
+        # Convert tensor to numpy array (C, H, W) -> (H, W, C)
+        image = image.permute(1, 2, 0).numpy()
+        image = (image * 255).astype(np.uint8)  # Convert to uint8
+        image = Image.fromarray(image)
+
+    if image.mode == 'RGBA':  # remove alpha channel
+        image = image.convert('RGB')
+
+    if is_training:
+        transform = get_train_transforms()
+    else:
+        transform = get_val_transforms()
+
     return transform(image)
 
 def load_image_from_path(image_path):
@@ -145,16 +289,18 @@ def create_country_mapping(countries):
 class CountryDataset(Dataset):
     """Dataset class for country-based classification"""
     
-    def __init__(self, image_paths, countries, country_to_idx):
+    def __init__(self, image_paths, countries, country_to_idx, is_training=False):
         """
         Args:
             image_paths: List of image file paths (S3 keys or local paths)
             countries: List of country names corresponding to each image
             country_to_idx: Dictionary mapping country name to class index
+            is_training: Whether this is for training (enables augmentation)
         """
         self.image_paths = image_paths
         self.countries = countries
         self.country_to_idx = country_to_idx
+        self.is_training = is_training
     
     def __len__(self):
         return len(self.image_paths)
@@ -163,9 +309,9 @@ class CountryDataset(Dataset):
         image_path = self.image_paths[i]
         country = self.countries[i]
         
-        # Load and preprocess image
+        # Load and preprocess image (with augmentation if training)
         image = load_image_from_path(image_path)
-        image = preprocess(image)
+        image = preprocess(image, is_training=self.is_training)
         
         # Get country label
         label = self.country_to_idx[country]
@@ -275,7 +421,11 @@ def main():
     
     if skipped_test_images > 0:
         print(f"\n⚠ Skipped {skipped_test_images} test images from countries not in training set")
-    
+
+    # Calculate totals for summary
+    total_train_images = len(train_image_paths)
+    total_test_images = len(test_image_paths)
+
     print(f"\nTraining samples: {len(train_image_paths)}")
     print(f"Test samples: {len(test_image_paths)}")
     print(f"Number of classes (countries): {num_classes}")
@@ -295,29 +445,46 @@ def main():
     # Initialize or load model
     if os.path.exists(MODEL_RESNET):
         print(f"\nLoading existing model from {MODEL_RESNET}")
-        resnet = torch.load(MODEL_RESNET)
+        resnet = torch.load(MODEL_RESNET, weights_only=False)
         # Verify model matches number of classes
         if resnet.fc.out_features != num_classes:
             print(f"Warning: Model has {resnet.fc.out_features} classes, but data has {num_classes}")
-            print("Reinitializing final layer...")
+            print("Reinitializing final layer with dropout...")
             num_features = resnet.fc.in_features
-            resnet.fc = nn.Linear(num_features, num_classes)
+            resnet.fc = nn.Sequential(
+                nn.Dropout(p=0.5),  # Add dropout before final layer
+                nn.Linear(num_features, num_classes)
+            )
     else:
         print("\nInitializing new ResNet-18 model...")
         resnet = resnet18(weights=ResNet18_Weights.DEFAULT)
         # Freeze all layers except final layer
         for param in resnet.parameters():
             param.requires_grad = False
-        # Reinitialize final layer for country classification
+        # Reinitialize final layer for country classification with dropout
         num_features = resnet.fc.in_features
-        resnet.fc = nn.Linear(num_features, num_classes)
+        resnet.fc = nn.Sequential(
+            nn.Dropout(p=0.5),  # Add dropout before final layer
+            nn.Linear(num_features, num_classes)
+        )
         print(f"Model initialized with {num_classes} output classes")
     
     # Create datasets and data loaders
-    train_data = CountryDataset(train_image_paths, train_countries, country_to_idx)
-    test_data = CountryDataset(test_image_paths, test_countries, country_to_idx)
-    train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=True)
+    train_data = CountryDataset(train_image_paths, train_countries, country_to_idx, is_training=True)
+    test_data = CountryDataset(test_image_paths, test_countries, country_to_idx, is_training=False)
+
+    # Calculate class weights for balanced sampling
+    from collections import Counter
+    country_counts = Counter(train_countries)
+    class_weights = {country_to_idx[country]: 1.0 / count for country, count in country_counts.items()}
+    sample_weights = [class_weights[country_to_idx[country]] for country in train_countries]
+
+    # Create weighted sampler for balanced training
+    from torch.utils.data import WeightedRandomSampler
+    sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
+
+    train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, sampler=sampler)
+    test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
     
     # Initialize output directories
     if not os.path.isdir(TRAIN_OUT):
@@ -333,7 +500,7 @@ def main():
     epoch = 0
     train_losses = []
     test_losses = []
-    if os.path.exists(LOSSES_CSV):
+    if os.path.exists(LOSSES_CSV) and os.path.getsize(LOSSES_CSV) > 0:
         with open(LOSSES_CSV, 'r') as losses_csv:
             next(losses_csv)
             for row in losses_csv:
@@ -344,7 +511,7 @@ def main():
     
     train_accuracies = []
     test_accuracies = []
-    if os.path.exists(ACCURACIES_CSV):
+    if os.path.exists(ACCURACIES_CSV) and os.path.getsize(ACCURACIES_CSV) > 0:
         with open(ACCURACIES_CSV, 'r') as accuracies_csv:
             next(accuracies_csv)
             for row in accuracies_csv:
@@ -410,10 +577,16 @@ def main():
             
             epoch += 1
     
+    # Generate training summary
+    training_summary = generate_training_summary(
+        total_train_images, total_test_images, num_classes, start_time
+    )
+
     print("=" * 60)
     print("Training complete!")
     print(f"Model saved to: {MODEL_RESNET}")
     print(f"Country mapping saved to: {MODEL_COUNTRY_MAP}")
+    print(f"Training summary saved to: {training_summary}")
     print("=" * 60)
 
 if __name__ == '__main__':
